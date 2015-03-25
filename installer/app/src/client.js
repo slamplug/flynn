@@ -74,9 +74,9 @@ var Client = {
 		});
 	},
 
-	sendPromptResponse: function (promptID, data) {
+	sendPromptResponse: function (installID, promptID, data) {
 		this.performRequest('POST', {
-			url: Config.endpoints.prompt.replace(':id', promptID),
+			url: Config.endpoints.prompt.replace(':id', installID).replace(':prompt_id', promptID),
 			body: data,
 			headers: {
 				'Content-Type': 'application/json'

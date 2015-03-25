@@ -97,7 +97,7 @@ export default createClass({
 			break;
 
 			case 'INSTALL_PROMPT_RESPONSE':
-				Client.sendPromptResponse(event.data.id, event.data);
+				Client.sendPromptResponse(this.state.installID, event.data.id, event.data);
 			break;
 
 			case 'DOMAIN':

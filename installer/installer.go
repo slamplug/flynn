@@ -37,12 +37,12 @@ var DisallowedEC2InstanceTypes = []string{"t1.micro", "t2.micro", "t2.small", "m
 var DefaultInstanceType = "m3.medium"
 
 type Stack struct {
+	ID string `json:"id"`
+
 	Region       string                  `json:"region,omitempty"`
 	NumInstances int                     `json:"num_instances,omitempty"`
 	InstanceType string                  `json:"instance_type,omitempty"`
 	Creds        aws.CredentialsProvider `json:"-"`
-	YesNoPrompt  func(string) bool       `json:"-"`
-	PromptInput  func(string) string     `json:"-"`
 
 	ControllerKey       string  `json:"controller_key,omitempty"`
 	ControllerPin       string  `json:"controller_pin,omitempty"`
@@ -66,10 +66,20 @@ type Stack struct {
 	InstanceIPs    []string              `json:"instance_ips,omitempty"`
 	DNSZoneID      string                `json:"dns_zone_id,omitempty"`
 
-	persistMutex sync.Mutex
-
 	cf  *cloudformation.CloudFormation
 	ec2 *ec2.EC2
+
+	api           *httpAPI
+	promptsMutex  sync.Mutex
+	subscribeMtx  sync.Mutex
+	subscriptions []*Subscription
+	eventsMtx     sync.Mutex
+	events        []*httpEvent
+	done          bool
+
+	Prompts       []*httpPrompt    `json:"-"`
+	PromptOutChan chan *httpPrompt `json:"-"`
+	PromptInChan  chan *httpPrompt `json:"-"`
 }
 
 func (s *Stack) setDefaults() {
@@ -140,24 +150,6 @@ func (s *Stack) DashboardLoginMsg() (string, error) {
 	return fmt.Sprintf("The built-in dashboard can be accessed at http://dashboard.%s with login token %s", s.Domain.Name, s.DashboardLoginToken), nil
 }
 
-func (s *Stack) promptUseExistingStack(savedStack *Stack) bool {
-	if s.StackID == "" || s.StackName == "" || savedStack.NumInstances != s.NumInstances || savedStack.InstanceType != s.InstanceType || savedStack.Region != s.Region {
-		return false
-	}
-
-	if err := s.fetchStack(); err != nil {
-		return false
-	}
-
-	if !s.YesNoPrompt(fmt.Sprintf("It appears you already have a cluster of this configuration (stack %s), would you like to continue?", s.StackName)) {
-		s.Domain = savedStack.Domain
-		s.DashboardLoginToken = savedStack.DashboardLoginToken
-		s.CACert = savedStack.CACert
-		return true
-	}
-	return false
-}
-
 func (s *Stack) RunAWS() error {
 	s.setDefaults()
 	if err := s.validateInputs(); err != nil {
@@ -171,18 +163,11 @@ func (s *Stack) RunAWS() error {
 	s.ec2 = ec2.New(s.Creds, s.Region, nil)
 	s.cf = cloudformation.New(s.Creds, s.Region, nil)
 
-	savedStack := &Stack{}
-	savedStack.load()
-	s.StackID = savedStack.StackID
-	s.StackName = savedStack.StackName
-	s.SSHKeyName = savedStack.SSHKeyName
-
 	go func() {
-		defer close(s.Done)
-
-		if s.promptUseExistingStack(savedStack) {
-			return
-		}
+		defer func() {
+			s.done = true
+			close(s.Done)
+		}()
 
 		steps := []func() error{
 			s.createKeyPair,
@@ -209,6 +194,11 @@ func (s *Stack) RunAWS() error {
 			s.SendEvent(fmt.Sprintf("WARNING: Failed to configure CLI: %s", err))
 		}
 	}()
+	return nil
+}
+
+func (s *Stack) persist() error {
+	// TODO: hook this up
 	return nil
 }
 
@@ -426,7 +416,6 @@ func (s *Stack) createStack() error {
 	}
 
 	s.SendEvent("Creating stack")
-	s.StackName = fmt.Sprintf("flynn-%d", time.Now().Unix())
 	res, err := s.cf.CreateStack(&cloudformation.CreateStackInput{
 		OnFailure:        aws.String("DELETE"),
 		StackName:        aws.String(s.StackName),

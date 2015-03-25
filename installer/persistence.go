@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/flynn/flynn/cli/config"
 	"github.com/flynn/flynn/pkg/sshkeygen"
@@ -21,9 +22,16 @@ func init() {
 	dataPath = filepath.Join(dir, "data.json")
 }
 
-func (s *Stack) load() error {
-	s.persistMutex.Lock()
-	defer s.persistMutex.Unlock()
+type Installer struct {
+	Stacks []*Stack `json:"stacks"`
+
+	persistMutex sync.Mutex
+}
+
+// TODO: handle loading old config data format (a single stack)
+func (i *Installer) load() error {
+	i.persistMutex.Lock()
+	defer i.persistMutex.Unlock()
 
 	file, err := os.Open(dataPath)
 	if err != nil {
@@ -31,15 +39,15 @@ func (s *Stack) load() error {
 	}
 	defer file.Close()
 	dec := json.NewDecoder(file)
-	if err := dec.Decode(&s); err != nil {
+	if err := dec.Decode(&i); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Stack) persist() error {
-	s.persistMutex.Lock()
-	defer s.persistMutex.Unlock()
+func (i *Installer) persist() error {
+	i.persistMutex.Lock()
+	defer i.persistMutex.Unlock()
 
 	if err := os.MkdirAll(filepath.Dir(dataPath), 0755); err != nil {
 		return err
@@ -50,7 +58,7 @@ func (s *Stack) persist() error {
 	}
 	defer file.Close()
 	enc := json.NewEncoder(file)
-	if err := enc.Encode(s); err != nil {
+	if err := enc.Encode(i); err != nil {
 		return err
 	}
 	return nil
