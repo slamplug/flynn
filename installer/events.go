@@ -16,7 +16,7 @@ type httpPrompt struct {
 	Resolved bool   `json:"resolved,omitempty"`
 	resChan  chan *httpPrompt
 	api      *httpAPI
-	stack    *Stack
+	stack    *Cluster
 }
 
 func (prompt *httpPrompt) Resolve(res *httpPrompt) {
@@ -39,7 +39,7 @@ type Subscription struct {
 	done       bool
 }
 
-func (sub *Subscription) sendEvents(s *Stack) {
+func (sub *Subscription) sendEvents(s *Cluster) {
 	if sub.done {
 		return
 	}
@@ -57,7 +57,7 @@ func (sub *Subscription) handleDone() {
 	close(sub.DoneChan)
 }
 
-func (s *Stack) Subscribe(eventChan chan *httpEvent) <-chan struct{} {
+func (s *Cluster) Subscribe(eventChan chan *httpEvent) <-chan struct{} {
 	s.subscribeMtx.Lock()
 	defer s.subscribeMtx.Unlock()
 
@@ -79,7 +79,7 @@ func (s *Stack) Subscribe(eventChan chan *httpEvent) <-chan struct{} {
 	return subscription.DoneChan
 }
 
-func (s *Stack) getEvents(sinceIndex int) []*httpEvent {
+func (s *Cluster) getEvents(sinceIndex int) []*httpEvent {
 	events := make([]*httpEvent, 0, len(s.events))
 	for index, event := range s.events {
 		if index <= sinceIndex {
@@ -90,7 +90,7 @@ func (s *Stack) getEvents(sinceIndex int) []*httpEvent {
 	return events
 }
 
-func (s *Stack) findPrompt(id string) (*httpPrompt, error) {
+func (s *Cluster) findPrompt(id string) (*httpPrompt, error) {
 	s.promptsMutex.Lock()
 	defer s.promptsMutex.Unlock()
 	for _, p := range s.Prompts {
@@ -101,13 +101,13 @@ func (s *Stack) findPrompt(id string) (*httpPrompt, error) {
 	return nil, errors.New("Prompt not found")
 }
 
-func (s *Stack) addPrompt(prompt *httpPrompt) {
+func (s *Cluster) addPrompt(prompt *httpPrompt) {
 	s.promptsMutex.Lock()
 	defer s.promptsMutex.Unlock()
 	s.Prompts = append(s.Prompts, prompt)
 }
 
-func (s *Stack) YesNoPrompt(msg string) bool {
+func (s *Cluster) YesNoPrompt(msg string) bool {
 	prompt := &httpPrompt{
 		ID:      random.Hex(16),
 		Type:    "yes_no",
@@ -133,7 +133,7 @@ func (s *Stack) YesNoPrompt(msg string) bool {
 	return res.Yes
 }
 
-func (s *Stack) PromptInput(msg string) string {
+func (s *Cluster) PromptInput(msg string) string {
 	prompt := &httpPrompt{
 		ID:      random.Hex(16),
 		Type:    "input",
@@ -159,7 +159,7 @@ func (s *Stack) PromptInput(msg string) string {
 	return res.Input
 }
 
-func (s *Stack) sendEvent(event *httpEvent) {
+func (s *Cluster) sendEvent(event *httpEvent) {
 	s.eventsMtx.Lock()
 	s.events = append(s.events, event)
 	s.eventsMtx.Unlock()
@@ -169,14 +169,14 @@ func (s *Stack) sendEvent(event *httpEvent) {
 	}
 }
 
-func (s *Stack) handleError(err error) {
+func (s *Cluster) handleError(err error) {
 	s.sendEvent(&httpEvent{
 		Type:        "error",
 		Description: err.Error(),
 	})
 }
 
-func (s *Stack) handleDone() {
+func (s *Cluster) handleDone() {
 	if s.Domain != nil {
 		s.sendEvent(&httpEvent{
 			Type:        "domain",
@@ -204,7 +204,7 @@ func (s *Stack) handleDone() {
 	}
 }
 
-func (s *Stack) handleEvents() {
+func (s *Cluster) handleEvents() {
 	for {
 		select {
 		case event := <-s.EventChan:

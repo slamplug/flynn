@@ -16,6 +16,9 @@ export default createClass({
 
 	getInitialState: function () {
 		return {
+			currentClusterID: null,
+			clusters: [],
+
 			installEvents: [],
 			installID: null,
 			domain: null,
@@ -44,19 +47,6 @@ export default createClass({
 				Client.closeEventStream();
 				Client.abortInstall(this.state.installID);
 				this.setState(this.getInitialState());
-			break;
-
-			case 'LOAD_INSTALL':
-				if (this.state.installID !== event.id) {
-					this.setState({
-						installID: event.id,
-						completedSteps: ['configure'],
-						currentStep: 'install'
-					});
-					Client.closeEventStream();
-					Client.openEventStream(event.id);
-				}
-				Client.checkInstallExists(event.id);
 			break;
 
 			case 'INSTALL_EXISTS':

@@ -50,24 +50,6 @@ var Client = {
 		});
 	},
 
-	checkInstallExists: function (installID) {
-		var handleResponse = function (args) {
-			var res = args[0];
-			var xhr = args[1];
-			Dispatcher.dispatch({
-				name: 'INSTALL_EXISTS',
-				exists: xhr.status === 200,
-				id: res.id
-			});
-		};
-		this.performRequest('GET', {
-			url: '/install/'+ installID,
-			headers: {
-				'Accept': 'application/json'
-			}
-		}).then(handleResponse).catch(handleResponse);
-	},
-
 	abortInstall: function (installID) {
 		return this.performRequest('DELETE', {
 			url: '/install/'+ installID

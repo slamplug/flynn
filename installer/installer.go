@@ -36,7 +36,7 @@ type Event struct {
 var DisallowedEC2InstanceTypes = []string{"t1.micro", "t2.micro", "t2.small", "m1.small"}
 var DefaultInstanceType = "m3.medium"
 
-type Stack struct {
+type Cluster struct {
 	ID string `json:"id"`
 
 	Region       string                  `json:"region,omitempty"`
@@ -82,7 +82,7 @@ type Stack struct {
 	PromptInChan  chan *httpPrompt `json:"-"`
 }
 
-func (s *Stack) setDefaults() {
+func (s *Cluster) setDefaults() {
 	if s.NumInstances == 0 {
 		s.NumInstances = 1
 	}
@@ -100,7 +100,7 @@ func (s *Stack) setDefaults() {
 	}
 }
 
-func (s *Stack) validateInputs() error {
+func (s *Cluster) validateInputs() error {
 	if s.NumInstances <= 0 {
 		return fmt.Errorf("You must specify at least one instance")
 	}
@@ -126,14 +126,14 @@ func (s *Stack) validateInputs() error {
 	return nil
 }
 
-func (s *Stack) ClusterAddCmd() (string, error) {
+func (s *Cluster) StackAddCmd() (string, error) {
 	if s.ControllerKey == "" || s.ControllerPin == "" || s.Domain == nil || s.Domain.Name == "" {
 		return "", fmt.Errorf("Not enough data present")
 	}
 	return fmt.Sprintf("flynn cluster add -g %[1]s:2222 -p %[2]s default https://controller.%[1]s %[3]s", s.Domain.Name, s.ControllerPin, s.ControllerKey), nil
 }
 
-func (s *Stack) ClusterConfig() *cfg.Cluster {
+func (s *Cluster) ClusterConfig() *cfg.Cluster {
 	return &cfg.Cluster{
 		Name:    s.StackName,
 		URL:     "https://controller." + s.Domain.Name,
@@ -143,14 +143,14 @@ func (s *Stack) ClusterConfig() *cfg.Cluster {
 	}
 }
 
-func (s *Stack) DashboardLoginMsg() (string, error) {
+func (s *Cluster) DashboardLoginMsg() (string, error) {
 	if s.DashboardLoginToken == "" || s.Domain == nil || s.Domain.Name == "" {
 		return "", fmt.Errorf("Not enough data present")
 	}
 	return fmt.Sprintf("The built-in dashboard can be accessed at http://dashboard.%s with login token %s", s.Domain.Name, s.DashboardLoginToken), nil
 }
 
-func (s *Stack) RunAWS() error {
+func (s *Cluster) RunAWS() error {
 	s.setDefaults()
 	if err := s.validateInputs(); err != nil {
 		return err
@@ -197,20 +197,20 @@ func (s *Stack) RunAWS() error {
 	return nil
 }
 
-func (s *Stack) persist() error {
+func (s *Cluster) persist() error {
 	// TODO: hook this up
 	return nil
 }
 
-func (s *Stack) SendEvent(description string) {
+func (s *Cluster) SendEvent(description string) {
 	s.EventChan <- &Event{description}
 }
 
-func (s *Stack) SendError(err error) {
+func (s *Cluster) SendError(err error) {
 	s.ErrChan <- err
 }
 
-func (s *Stack) fetchImageID() (err error) {
+func (s *Cluster) fetchImageID() (err error) {
 	defer func() {
 		if err == nil {
 			return
@@ -244,7 +244,7 @@ func (s *Stack) fetchImageID() (err error) {
 	return nil
 }
 
-func (s *Stack) allocateDomain() error {
+func (s *Cluster) allocateDomain() error {
 	s.SendEvent("Allocating domain")
 	domain, err := AllocateDomain()
 	if err != nil {
@@ -254,7 +254,7 @@ func (s *Stack) allocateDomain() error {
 	return nil
 }
 
-func (s *Stack) loadKeyPair(name string) error {
+func (s *Cluster) loadKeyPair(name string) error {
 	keypair, err := loadSSHKey(name)
 	if err != nil {
 		return err
@@ -288,7 +288,7 @@ func (s *Stack) loadKeyPair(name string) error {
 	return saveSSHKey(s.SSHKeyName, keypair)
 }
 
-func (s *Stack) createKeyPair() error {
+func (s *Cluster) createKeyPair() error {
 	keypairName := "flynn"
 	if s.SSHKeyName != "" {
 		keypairName = s.SSHKeyName
@@ -350,7 +350,7 @@ type stackTemplateData struct {
 	DefaultInstanceType string
 }
 
-func (s *Stack) createStack() error {
+func (s *Cluster) createStack() error {
 	s.SendEvent("Generating start script")
 	startScript, discoveryToken, err := genStartScript(s.NumInstances)
 	if err != nil {
@@ -375,7 +375,7 @@ func (s *Stack) createStack() error {
 			ParameterValue: aws.String(s.ImageID),
 		},
 		{
-			ParameterKey:   aws.String("ClusterDomain"),
+			ParameterKey:   aws.String("StackDomain"),
 			ParameterValue: aws.String(s.Domain.Name),
 		},
 		{
@@ -468,7 +468,7 @@ func (e StackEventSort) Less(i, j int) bool {
 	return e[j].Timestamp.After(e[i].Timestamp)
 }
 
-func (s *Stack) waitForStackCompletion(action string, after time.Time) error {
+func (s *Cluster) waitForStackCompletion(action string, after time.Time) error {
 	stackID := aws.String(s.StackID)
 
 	actionCompleteSuffix := "_COMPLETE"
@@ -559,7 +559,7 @@ func (s *Stack) waitForStackCompletion(action string, after time.Time) error {
 	return nil
 }
 
-func (s *Stack) fetchStack() error {
+func (s *Cluster) fetchStack() error {
 	stackID := aws.String(s.StackID)
 
 	s.SendEvent("Fetching stack")
@@ -580,7 +580,7 @@ func (s *Stack) fetchStack() error {
 	return nil
 }
 
-func (s *Stack) fetchStackOutputs() error {
+func (s *Cluster) fetchStackOutputs() error {
 	s.fetchStack()
 
 	s.InstanceIPs = make([]string, 0, s.NumInstances)
@@ -603,7 +603,7 @@ func (s *Stack) fetchStackOutputs() error {
 	return nil
 }
 
-func (s *Stack) configureDNS() error {
+func (s *Cluster) configureDNS() error {
 	// TODO(jvatic): Run directly after receiving zone create complete stack event
 	s.SendEvent("Configuring DNS")
 
@@ -620,7 +620,7 @@ func (s *Stack) configureDNS() error {
 	return nil
 }
 
-func (s *Stack) waitForDNS() error {
+func (s *Cluster) waitForDNS() error {
 	s.SendEvent("Waiting for DNS to propagate")
 	for {
 		status, err := s.Domain.Status()
@@ -664,7 +664,7 @@ func instanceRunCmd(cmd string, sshConfig *ssh.ClientConfig, ipAddress string) (
 	return
 }
 
-func (s *Stack) uploadDebugInfo(sshConfig *ssh.ClientConfig, ipAddress string) {
+func (s *Cluster) uploadDebugInfo(sshConfig *ssh.ClientConfig, ipAddress string) {
 	cmd := "sudo flynn-host upload-debug-info"
 	stdout, stderr, _ := instanceRunCmd(cmd, sshConfig, ipAddress)
 	var buf bytes.Buffer
@@ -682,7 +682,7 @@ type stepInfo struct {
 	Timestamp time.Time        `json:"ts"`
 }
 
-func (s *Stack) bootstrap() error {
+func (s *Cluster) bootstrap() error {
 	s.SendEvent("Running bootstrap")
 
 	if s.Stack == nil {
@@ -803,7 +803,7 @@ func (s *Stack) bootstrap() error {
 	return nil
 }
 
-func (s *Stack) configureCLI() error {
+func (s *Cluster) configureCLI() error {
 	config, err := cfg.ReadFile(cfg.DefaultPath())
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -848,7 +848,7 @@ flynn-host init --discovery={{.DiscoveryToken}}
 start flynn-host
 `[1:]))
 
-func (s *Stack) GetOutput(name string) (string, error) {
+func (s *Cluster) GetOutput(name string) (string, error) {
 	var value string
 	for _, o := range s.Stack.Outputs {
 		if *o.OutputKey == name {

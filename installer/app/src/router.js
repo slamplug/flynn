@@ -12,13 +12,6 @@ var MainRouter = Router.createClass({
 		Dispatcher.register(this.handleEvent.bind(this));
 	},
 
-	beforeHandler: function (event) {
-		Dispatcher.dispatch({
-			name: 'LOAD_INSTALL',
-			id: event.params[0].install_id || ''
-		});
-	},
-
 	landingPage: function (params, opts, context) {
 		var props = {
 			dataStore: context.dataStore
@@ -30,21 +23,12 @@ var MainRouter = Router.createClass({
 		var installID;
 		switch (event.name) {
 			case 'INSTALL_ABORT':
-				this.history.navigate('/', { replace: true });
-			break;
-
-			case 'INSTALL_EXISTS':
-				installID = this.history.pathParams[0].install_id;
-				if ( !event.exists && (!event.id || event.id === installID) ) {
-					this.history.navigate('/', { replace: true });
-				} else if (event.exists && installID !== event.id) {
-					this.history.navigate('/install/'+ event.id, { replace: true });
-				}
+				this.history.navigate('/');
 			break;
 
 			case 'LAUNCH_INSTALL_SUCCESS':
 				installID = event.res.id;
-				this.history.navigate('/install/'+ installID, { replace: true });
+				this.history.navigate('/install/'+ installID);
 			break;
 		}
 	}

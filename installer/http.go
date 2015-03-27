@@ -53,10 +53,11 @@ type jsonInputCreds struct {
 }
 
 type httpAPI struct {
-	InstallerStackMtx sync.Mutex
-	AWSEnvCreds       aws.CredentialsProvider
-	Installer         *Installer
-	logger            log.Logger
+	InstallerClusterMtx sync.Mutex
+	AWSEnvCreds         aws.CredentialsProvider
+	Installer           *Installer
+	logger              log.Logger
+	clientConfig        installerJSConfig
 }
 
 func ServeHTTP() error {
@@ -66,15 +67,25 @@ func ServeHTTP() error {
 	api := &httpAPI{
 		Installer: installer,
 		logger:    log.New(),
+		clientConfig: installerJSConfig{
+			Endpoints: map[string]string{
+				"clusters": "/clusters",
+				"install":  "/install",
+				"events":   "/events/:id",
+				"prompt":   "/install/:id/prompt/:prompt_id",
+			},
+		},
 	}
 
 	if creds, err := aws.EnvCreds(); err == nil {
 		api.AWSEnvCreds = creds
 	}
+	api.clientConfig.HasAWSEnvCredentials = api.AWSEnvCreds != nil
 
 	httpRouter := httprouter.New()
 
 	httpRouter.GET("/", api.ServeTemplate)
+	httpRouter.GET("/clusters", api.GetClusters)
 	httpRouter.GET("/install", api.ServeTemplate)
 	httpRouter.GET("/install/:id", api.ServeTemplate)
 	httpRouter.DELETE("/install/:id", api.AbortInstallHandler)
@@ -129,14 +140,20 @@ func (api *httpAPI) AssetManifest() (*assetManifest, error) {
 	return manifest, nil
 }
 
+func (api *httpAPI) GetClusters(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
+	api.InstallerClusterMtx.Lock()
+	defer api.InstallerClusterMtx.Unlock()
+	httphelper.JSON(w, 200, api.Installer.Clusters)
+}
+
 func (api *httpAPI) InstallHandler(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
 	var input *jsonInput
 	if err := httphelper.DecodeJSON(req, &input); err != nil {
 		httphelper.Error(w, err)
 		return
 	}
-	api.InstallerStackMtx.Lock()
-	defer api.InstallerStackMtx.Unlock()
+	api.InstallerClusterMtx.Lock()
+	defer api.InstallerClusterMtx.Unlock()
 
 	var creds aws.CredentialsProvider
 	if input.Creds.AccessKeyID != "" && input.Creds.SecretAccessKey != "" {
@@ -149,7 +166,7 @@ func (api *httpAPI) InstallHandler(w http.ResponseWriter, req *http.Request, par
 			return
 		}
 	}
-	s := &Stack{
+	s := &Cluster{
 		Creds:        creds,
 		Region:       input.Region,
 		InstanceType: input.InstanceType,
@@ -164,48 +181,48 @@ func (api *httpAPI) InstallHandler(w http.ResponseWriter, req *http.Request, par
 		httphelper.Error(w, err)
 		return
 	}
-	api.Installer.Stacks = append(api.Installer.Stacks, s)
+	api.Installer.Clusters = append(api.Installer.Clusters, s)
 	go s.handleEvents()
 	httphelper.JSON(w, 200, s)
 }
 
-func (api *httpAPI) findStack(id string) (*Stack, error) {
-	api.InstallerStackMtx.Lock()
-	defer api.InstallerStackMtx.Unlock()
-	for _, s := range api.Installer.Stacks {
+func (api *httpAPI) findCluster(id string) (*Cluster, error) {
+	api.InstallerClusterMtx.Lock()
+	defer api.InstallerClusterMtx.Unlock()
+	for _, s := range api.Installer.Clusters {
 		if s.ID == id {
 			return s, nil
 		}
 	}
-	return nil, errors.New("Stack not found")
+	return nil, errors.New("Cluster not found")
 }
 
-func (api *httpAPI) deleteStack(id string) {
-	api.InstallerStackMtx.Lock()
-	defer api.InstallerStackMtx.Unlock()
-	stacks := make([]*Stack, 0, len(api.Installer.Stacks))
+func (api *httpAPI) deleteCluster(id string) {
+	api.InstallerClusterMtx.Lock()
+	defer api.InstallerClusterMtx.Unlock()
+	stacks := make([]*Cluster, 0, len(api.Installer.Clusters))
 	// TODO(jvatic): Cleanup stack
-	for _, s := range api.Installer.Stacks {
+	for _, s := range api.Installer.Clusters {
 		if s.ID != id {
 			stacks = append(stacks, s)
 		}
 	}
-	api.Installer.Stacks = stacks
+	api.Installer.Clusters = stacks
 }
 
 func (api *httpAPI) AbortInstallHandler(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
 	id := params.ByName("id")
-	_, err := api.findStack(id)
+	_, err := api.findCluster(id)
 	if err != nil {
 		w.WriteHeader(404)
 		return
 	}
-	api.deleteStack(id)
+	api.deleteCluster(id)
 	w.WriteHeader(200)
 }
 
 func (api *httpAPI) EventsHandler(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
-	s, err := api.findStack(params.ByName("id"))
+	s, err := api.findCluster(params.ByName("id"))
 	if err != nil {
 		httphelper.ObjectNotFoundError(w, "install instance not found")
 		return
@@ -233,7 +250,7 @@ func (api *httpAPI) EventsHandler(w http.ResponseWriter, req *http.Request, para
 }
 
 func (api *httpAPI) PromptHandler(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
-	s, err := api.findStack(params.ByName("id"))
+	s, err := api.findCluster(params.ByName("id"))
 	if err != nil {
 		httphelper.ObjectNotFoundError(w, "install instance not found")
 		return
@@ -264,14 +281,7 @@ func (api *httpAPI) ServeApplicationJS(w http.ResponseWriter, req *http.Request,
 
 	var jsConf bytes.Buffer
 	jsConf.Write([]byte("window.InstallerConfig = "))
-	json.NewEncoder(&jsConf).Encode(installerJSConfig{
-		Endpoints: map[string]string{
-			"install": "/install",
-			"events":  "/events/:id",
-			"prompt":  "/install/:id/prompt/:prompt_id",
-		},
-		HasAWSEnvCredentials: api.AWSEnvCreds != nil,
-	})
+	json.NewEncoder(&jsConf).Encode(api.clientConfig)
 	jsConf.Write([]byte(";\n"))
 
 	r := ioutil.NewMultiReadSeeker(bytes.NewReader(jsConf.Bytes()), data)
@@ -295,7 +305,7 @@ func (api *httpAPI) ServeAsset(w http.ResponseWriter, req *http.Request, params 
 
 func (api *httpAPI) ServeTemplate(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
 	if req.Header.Get("Accept") == "application/json" {
-		s, err := api.findStack(params.ByName("id"))
+		s, err := api.findCluster(params.ByName("id"))
 		if err != nil {
 			w.WriteHeader(404)
 			return

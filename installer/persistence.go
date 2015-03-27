@@ -23,7 +23,7 @@ func init() {
 }
 
 type Installer struct {
-	Stacks []*Stack `json:"stacks"`
+	Clusters []*Cluster `json:"clusters"`
 
 	persistMutex sync.Mutex
 }

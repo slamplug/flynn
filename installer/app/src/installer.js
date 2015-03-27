@@ -27,7 +27,7 @@ export default {
 		props.key = 'content';
 		var contentComponent = React.createElement(component, props, children);
 		React.render(
-			React.createElement(MainComponent, {}, [contentComponent]),
+			React.createElement(MainComponent, { dataStore: this.dataStore }, [contentComponent]),
 			this.el
 		);
 	},

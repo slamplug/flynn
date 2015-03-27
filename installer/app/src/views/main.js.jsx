@@ -26,9 +26,6 @@ var Main = React.createClass({
 
 						<List>
 							<ListItem selected={true}>New</ListItem>
-							<ListItem>flynn-1427144430</ListItem>
-							<ListItem>flynn-1421342430</ListItem>
-							<ListItem>flynn-1420322333</ListItem>
 						</List>
 					</Panel>
 				</div>
@@ -38,6 +35,26 @@ var Main = React.createClass({
 				</div>
 			</div>
 		);
+	},
+
+	componentDidMount: function () {
+		this.props.dataStore.addChangeListener(this.__handleDataChange);
+	},
+
+	componentWillUnmount: function () {
+		this.props.dataStore.removeChangeListener(this.__handleDataChange);
+	},
+
+	getInitialState: function () {
+		return this.__getState();
+	},
+
+	__getState: function () {
+		return this.props.dataStore.state;
+	},
+
+	__handleDataChange: function () {
+		this.setState(this.__getState());
 	}
 });
 export default Main;
