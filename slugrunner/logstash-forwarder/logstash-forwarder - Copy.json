@@ -1,0 +1,20 @@
+{
+  "network": {
+    "servers": [ "elk:5043" ],
+    "ssl certificate": "/opt/logstash-forwarder/certs/lumberjack.crt",
+    "ssl key": "/opt/logstash-forwarder/certs/lumberjack.key",
+    "ssl ca": "/opt/logstash-forwarder/certs/lumberjack.crt",
+    "timeout": 15
+  },
+  "files": [
+    {
+      "paths": [
+        "/tmp/server.log"
+      ],
+      "fields": { "type": "syslog" }
+    },{
+      "paths": [ "-" ],
+      "fields": { "type": "stdin" }
+    }
+  ]
+}
